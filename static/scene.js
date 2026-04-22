@@ -22,12 +22,14 @@ const LANDSCAPE_HIGHLIGHT = {
   dawn: '#a8a0b8', morning: '#cadc9a', day: '#b8d89c', evening: '#c86a78', night: '#2a2550',
 };
 
-function Scene({ timeOfDay = 'morning', weather = 'clear', width, height, children }) {
+function Scene({ timeOfDay = 'morning', weather = 'clear', intensity = 'moderate', hasThunder = false, width, height, children }) {
   const grads = SKY_GRADIENTS[timeOfDay];
   const clouds = CLOUD_COLORS[timeOfDay];
   const land = LANDSCAPE_COLOR[timeOfDay];
-  const desatAmount = weather === 'cloudy' || weather === 'rain' ? 0.25 : 0;
-  const cover = weather === 'clear' ? 0.1 : weather === 'cloudy' ? 0.85 : weather === 'rain' ? 0.95 : weather === 'snow' ? 0.6 : 0.35;
+
+  const isWet = ['drizzle','rain','thunderstorm'].includes(weather);
+  const desatAmount = weather === 'clouds' ? 0.15 : isWet ? (intensity === 'extreme' ? 0.45 : intensity === 'heavy' ? 0.35 : 0.2) : weather === 'mist' ? 0.3 : 0;
+  const cover = weather === 'clear' ? 0.1 : weather === 'clouds' ? 0.85 : isWet || weather === 'thunderstorm' ? 0.98 : weather === 'snow' ? 0.6 : 0.35;
 
   return (
     <div style={{
@@ -42,9 +44,15 @@ function Scene({ timeOfDay = 'morning', weather = 'clear', width, height, childr
       <CelestialBody timeOfDay={timeOfDay} />
       <Clouds colors={clouds} timeOfDay={timeOfDay} cover={cover} />
       <Landscape color={land} highlight={LANDSCAPE_HIGHLIGHT[timeOfDay]} timeOfDay={timeOfDay} />
-      {weather === 'rain' && <Rain />}
-      {weather === 'snow' && <Snow />}
-      {weather === 'cloudy' && <Haze />}
+
+      {weather === 'drizzle' && <Rain intensity="light" isDrizzle={true} />}
+      {weather === 'rain' && <Rain intensity={intensity} isDrizzle={false} />}
+      {weather === 'thunderstorm' && <Rain intensity={intensity || 'heavy'} isDrizzle={false} />}
+      {(weather === 'thunderstorm' || hasThunder) && <Lightning intensity={intensity} />}
+      {weather === 'snow' && <Snow intensity={intensity} />}
+      {weather === 'clouds' && <Haze opacity={0.15} />}
+      {weather === 'mist' && <Haze opacity={0.4} />}
+
       <AtmosphereOverlay timeOfDay={timeOfDay} />
       <div style={{ position: 'relative', width: '100%', height: '100%', zIndex: 5 }}>
         {children}
@@ -201,30 +209,126 @@ function AtmosphereOverlay({ timeOfDay }) {
   );
 }
 
-function Rain() {
-  const drops = React.useMemo(() => [...Array(45)].map(() => ({ x: Math.random() * 100, delay: Math.random() * 1.5, dur: 0.7 + Math.random() * 0.5, len: 12 + Math.random() * 18 })), []);
+function Rain({ intensity = 'moderate', isDrizzle = false }) {
+  const cfg = {
+    light:    { count: 25, minLen: 8,  maxLen: 14, minDur: 0.9, maxDur: 1.3, opacity: 0.35, width: 1,   angle: 2 },
+    moderate: { count: 50, minLen: 14, maxLen: 22, minDur: 0.6, maxDur: 0.9, opacity: 0.5,  width: 1.2, angle: 5 },
+    heavy:    { count: 80, minLen: 22, maxLen: 35, minDur: 0.4, maxDur: 0.65,opacity: 0.65, width: 1.5, angle: 10 },
+    extreme:  { count:120, minLen: 30, maxLen: 50, minDur: 0.3, maxDur: 0.5, opacity: 0.75, width: 2,   angle: 14 },
+  };
+  const c = isDrizzle
+    ? { count: 30, minLen: 5, maxLen: 9, minDur: 1.2, maxDur: 1.8, opacity: 0.28, width: 0.8, angle: 0 }
+    : (cfg[intensity] || cfg.moderate);
+
+  const drops = React.useMemo(() => [...Array(c.count)].map(() => ({
+    x: Math.random() * 110 - 5,
+    delay: Math.random() * 2,
+    dur: c.minDur + Math.random() * (c.maxDur - c.minDur),
+    len: c.minLen + Math.random() * (c.maxLen - c.minLen),
+  })), [intensity, isDrizzle]);
+
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
       {drops.map((d, i) => (
-        <div key={i} style={{ position: 'absolute', left: `${d.x}%`, top: '-10%', width: 1, height: d.len, background: 'linear-gradient(180deg, transparent, rgba(200,220,240,0.55))', animation: `toki-rain ${d.dur}s linear ${d.delay}s infinite` }} />
+        <div key={i} style={{
+          position: 'absolute',
+          left: `${d.x}%`, top: '-10%',
+          width: c.width,
+          height: d.len,
+          background: `linear-gradient(180deg, transparent, rgba(200,220,240,${c.opacity}))`,
+          transform: `rotate(${c.angle}deg)`,
+          animation: `toki-rain ${d.dur}s linear ${d.delay}s infinite`,
+        }} />
       ))}
     </div>
   );
 }
 
-function Snow() {
-  const flakes = React.useMemo(() => [...Array(40)].map(() => ({ x: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 8, size: 2 + Math.random() * 4, drift: (Math.random() - 0.5) * 40 })), []);
+function Lightning({ intensity = 'moderate' }) {
+  const [flash, setFlash] = React.useState(null);
+
+  React.useEffect(() => {
+    // 번개 간격: heavy/extreme는 짧게, moderate는 보통
+    const baseInterval = intensity === 'extreme' ? 2500 : intensity === 'heavy' ? 4000 : 7000;
+
+    const schedule = () => {
+      const jitter = Math.random() * baseInterval;
+      return setTimeout(() => {
+        // 번개 모양 (SVG path) 랜덤 생성
+        const x1 = 20 + Math.random() * 60;
+        const path = `M${x1} 0 L${x1 - 6 + Math.random()*12} ${30 + Math.random()*20} L${x1 + 8} ${50 + Math.random()*15} L${x1 - 12} ${80 + Math.random()*20} L${x1 + 4} 100`;
+        setFlash({ path, x: x1 });
+        // 이중 플래시 (번개 특유의 두 번 번쩍임)
+        setTimeout(() => setFlash(null), 80);
+        setTimeout(() => setFlash({ path, x: x1 }), 120);
+        setTimeout(() => setFlash(null), 220);
+        t = schedule();
+      }, jitter + baseInterval * 0.5);
+    };
+    let t = schedule();
+    return () => clearTimeout(t);
+  }, [intensity]);
+
+  if (!flash) return null;
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4 }}>
+      {/* 하늘 전체 섬광 */}
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(220,230,255,0.18)', animation: 'none' }} />
+      {/* 번개 선 */}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '60%', top: 0 }}>
+        <path d={flash.path} stroke="rgba(255,255,240,0.95)" strokeWidth="0.4" fill="none" filter="url(#lightning-glow)" />
+        <path d={flash.path} stroke="rgba(200,220,255,0.5)" strokeWidth="1.5" fill="none" />
+        <defs>
+          <filter id="lightning-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="0.8" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+        </defs>
+      </svg>
+    </div>
+  );
+}
+
+function Snow({ intensity = 'moderate' }) {
+  const cfg = {
+    light:    { count: 25, minSize: 2,   maxSize: 4,   minDur: 10, maxDur: 16 },
+    moderate: { count: 45, minSize: 2.5, maxSize: 5,   minDur: 8,  maxDur: 14 },
+    heavy:    { count: 70, minSize: 3,   maxSize: 6.5, minDur: 6,  maxDur: 11 },
+    extreme:  { count: 100,minSize: 3,   maxSize: 7,   minDur: 5,  maxDur: 9  },
+  };
+  const c = cfg[intensity] || cfg.moderate;
+  const flakes = React.useMemo(() => [...Array(c.count)].map(() => ({
+    x: Math.random() * 100, delay: Math.random() * 10,
+    dur: c.minDur + Math.random() * (c.maxDur - c.minDur),
+    size: c.minSize + Math.random() * (c.maxSize - c.minSize),
+    drift: (Math.random() - 0.5) * 50,
+  })), [intensity]);
+
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
       {flakes.map((f, i) => (
-        <div key={i} style={{ position: 'absolute', left: `${f.x}%`, top: '-5%', width: f.size, height: f.size, borderRadius: '50%', background: 'rgba(255,255,255,0.85)', boxShadow: '0 0 4px rgba(255,255,255,0.5)', animation: `toki-snow ${f.dur}s linear ${f.delay}s infinite`, '--drift': `${f.drift}px` }} />
+        <div key={i} style={{
+          position: 'absolute', left: `${f.x}%`, top: '-5%',
+          width: f.size, height: f.size, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.9)',
+          boxShadow: '0 0 4px rgba(255,255,255,0.6)',
+          animation: `toki-snow ${f.dur}s ease-in ${f.delay}s infinite`,
+          '--drift': `${f.drift}px`,
+        }} />
       ))}
     </div>
   );
 }
 
-function Haze() {
-  return <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(240,235,230,0.3), rgba(200,195,190,0.4))', pointerEvents: 'none', mixBlendMode: 'overlay' }} />;
+function Haze({ opacity = 0.3 }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      background: `radial-gradient(ellipse at 50% 50%, rgba(240,235,230,${opacity}), rgba(200,195,190,${opacity * 1.3}))`,
+      pointerEvents: 'none', mixBlendMode: 'overlay',
+    }} />
+  );
 }
 
 // Inject scene styles

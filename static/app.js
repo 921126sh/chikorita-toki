@@ -263,6 +263,8 @@ function NameToast({ timeOfDay, token, onNamed, onSkip }) {
 function App() {
   const [timeOfDay, setTimeOfDay] = React.useState(getTimeOfDay());
   const [weather, setWeather] = React.useState('clear');
+  const [weatherIntensity, setWeatherIntensity] = React.useState('moderate');
+  const [hasThunder, setHasThunder] = React.useState(false);
   const [flying, setFlying] = React.useState([]);
   const [showModal, setShowModal] = React.useState(false);
   const [showNameToast, setShowNameToast] = React.useState(false);
@@ -285,7 +287,11 @@ function App() {
   React.useEffect(() => {
     const load = async () => {
       const data = await apiGet('/api/weather');
-      if (data) setWeather(data.condition);
+      if (data) {
+        setWeather(data.condition);
+        setWeatherIntensity(data.intensity || 'moderate');
+        setHasThunder(data.has_thunder || false);
+      }
     };
     load();
     const iv = setInterval(load, 30 * 60 * 1000);
@@ -352,7 +358,7 @@ function App() {
 
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
-      <Scene timeOfDay={timeOfDay} weather={weather}>
+      <Scene timeOfDay={timeOfDay} weather={weather} intensity={weatherIntensity} hasThunder={hasThunder}>
 
         {/* Top right — user info */}
         {loggedIn && (

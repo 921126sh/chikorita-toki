@@ -57,7 +57,9 @@ class EggNameRequest(BaseModel):
 
 
 class WeatherResponse(BaseModel):
-    condition: str        # clear, clouds, rain, snow, drizzle, thunderstorm, mist
+    condition: str        # clear, clouds, drizzle, rain, heavy_rain, thunderstorm, snow, mist
+    intensity: str        # light, moderate, heavy, extreme
+    has_thunder: bool
     description: str
     temp: float
     city: str
