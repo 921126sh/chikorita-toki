@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Toki</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="bg-canvas"></canvas>
+
+    <div id="main">
+      <div id="egg-area">
+        <div id="egg" title="클릭해봐요"></div>
+        <div id="egg-label"></div>
+        <div id="days-label"></div>
+      </div>
+
+      <div id="messages-area"></div>
+
+      <div id="input-area">
+        <input
+          id="message-input"
+          type="text"
+          maxlength="100"
+          placeholder="오늘 하루 어땠어?"
+          autocomplete="off"
+        />
+      </div>
+    </div>
+
+    <div id="top-right">
+      <span id="user-label"></span>
+      <button id="help-btn">?</button>
+    </div>
+  </div>
+
+  <!-- 도움말 / 로그인 모달 -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal">
+      <button id="modal-close">✕</button>
+
+      <div id="about-section">
+        <h2>Toki란?</h2>
+        <p>일하다 잠깐 머리 비우는 공간이에요.<br>
+        알과 함께 있고, 하고 싶은 말은 하늘로 날려보내세요.<br>
+        아무것도 남지 않아요.</p>
+      </div>
+
+      <div id="auth-section">
+        <div id="auth-tabs">
+          <button class="tab active" data-tab="login">로그인</button>
+          <button class="tab" data-tab="register">처음이에요</button>
+        </div>
+
+        <div id="login-form" class="auth-form">
+          <input id="login-nickname" type="text" placeholder="닉네임" maxlength="20" />
+          <input id="login-pin" type="password" placeholder="PIN 4자리" maxlength="4" inputmode="numeric" />
+          <button id="login-btn">로그인</button>
+          <p id="login-error" class="error-msg hidden"></p>
+        </div>
+
+        <div id="register-form" class="auth-form hidden">
+          <input id="reg-nickname" type="text" placeholder="닉네임 (2~20자)" maxlength="20" />
+          <input id="reg-pin" type="password" placeholder="PIN 4자리 (숫자)" maxlength="4" inputmode="numeric" />
+          <button id="register-btn">알 입양하기</button>
+          <p id="reg-error" class="error-msg hidden"></p>
+        </div>
+
+        <p class="auth-hint">로그인하면 알을 계속 키울 수 있어요.<br>PIN을 잊으면 새 알을 입양하면 돼요.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 이름 짓기 토스트 -->
+  <div id="name-toast" class="hidden">
+    <span>알 이름을 지어줄래요?</span>
+    <input id="name-input" type="text" placeholder="이름" maxlength="20" />
+    <button id="name-btn">지어주기</button>
+    <button id="name-skip">나중에</button>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
