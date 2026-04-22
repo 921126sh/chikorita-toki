@@ -1,0 +1,51 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        id: deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            cd ~/projects/chikorita-toki
+            git pull origin main
+
+            cd ~/projects/chikorita-infra
+            docker compose -f docker-compose.prod.yml up -d --build toki-app
+            docker image prune -f
+
+            for i in $(seq 1 20); do
+              if docker compose -f docker-compose.prod.yml exec -T toki-app curl -sf http://localhost:8002/health > /dev/null 2>&1; then
+                echo "Health check passed! ($((i * 3))s)"
+                exit 0
+              fi
+              echo "Waiting for app to start... ($i/20, $((i * 3))s elapsed)"
+              sleep 3
+            done
+            echo "Health check failed after 60s!"
+            docker compose -f docker-compose.prod.yml logs --tail=80 toki-app
+            exit 1
+
+      - name: Notify Success
+        if: success()
+        run: |
+          curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            -d text="✅ toki-app 배포 성공 (${{ github.sha }})"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          curl -sf -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            -d text="❌ toki-app 배포 실패 (${{ github.sha }}) — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
