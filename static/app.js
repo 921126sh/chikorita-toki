@@ -1,358 +1,420 @@
-// ── 상태 ──────────────────────────────────────────
-const state = {
-  token: localStorage.getItem('toki_token'),
-  nickname: localStorage.getItem('toki_nickname'),
-  eggName: localStorage.getItem('toki_egg_name'),
-  adoptedAt: localStorage.getItem('toki_adopted_at'),
-  weather: null,
-  lastInteraction: Date.now(),
+// Toki — main app with API integration
+
+const PLACEHOLDERS = {
+  dawn: '잠 못 자고 있어?', morning: '오늘 하루 어떨 것 같아?',
+  day: '지금 어때?', evening: '오늘 수고했어', night: '뭐든 털어놔봐',
 };
 
-// ── DOM ───────────────────────────────────────────
-const egg = document.getElementById('egg');
-const eggLabel = document.getElementById('egg-label');
-const daysLabel = document.getElementById('days-label');
-const userLabel = document.getElementById('user-label');
-const msgInput = document.getElementById('message-input');
-const messagesArea = document.getElementById('messages-area');
-const modalOverlay = document.getElementById('modal-overlay');
-const helpBtn = document.getElementById('help-btn');
-const modalClose = document.getElementById('modal-close');
-const nameToast = document.getElementById('name-toast');
-const nameInput = document.getElementById('name-input');
-const nameBtn = document.getElementById('name-btn');
-const nameSkip = document.getElementById('name-skip');
+const TEXT_COLOR = {
+  dawn: 'rgba(240,232,255,0.92)', morning: 'rgba(80,55,35,0.88)',
+  day: 'rgba(60,80,70,0.88)', evening: 'rgba(70,35,55,0.9)', night: 'rgba(230,222,255,0.92)',
+};
 
-// ── 배경 캔버스 ───────────────────────────────────
-const canvas = document.getElementById('bg-canvas');
-const ctx = canvas.getContext('2d');
-let particles = [];
+const INPUT_BG = {
+  dawn: 'rgba(255,255,255,0.1)', morning: 'rgba(255,255,255,0.45)',
+  day: 'rgba(255,255,255,0.55)', evening: 'rgba(255,255,255,0.18)', night: 'rgba(255,255,255,0.1)',
+};
 
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+const INPUT_BORDER = {
+  dawn: 'rgba(220,210,255,0.2)', morning: 'rgba(255,240,220,0.7)',
+  day: 'rgba(255,255,255,0.8)', evening: 'rgba(255,220,200,0.35)', night: 'rgba(200,190,240,0.22)',
+};
+
+// ── Utilities ─────────────────────────────────────
+function getTimeOfDay() {
+  const h = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+  if (h < 6) return 'dawn';
+  if (h < 12) return 'morning';
+  if (h < 18) return 'day';
+  if (h < 21) return 'evening';
+  return 'night';
 }
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
 
-function getBgGradient(hour, weather) {
-  const gradients = {
-    dawn:    ['#0d0b2e', '#2d1b4e', '#4a1942'],
-    morning: ['#ffd6a5', '#ffafcc', '#cdb4db'],
-    day:     ['#a8dadc', '#caf0f8', '#e9f5f7'],
-    evening: ['#e07a5f', '#f2a65a', '#9e6b8c'],
-    night:   ['#0d0b2e', '#1a1040', '#2a1650'],
+function daysSince(isoStr) {
+  return Math.floor((Date.now() - new Date(isoStr)) / 86400000);
+}
+
+// ── API helpers ────────────────────────────────────
+async function apiPost(path, body, token) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || '오류가 발생했어요');
+  return data;
+}
+
+async function apiPatch(path, body, token) {
+  const res = await fetch(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || '오류가 발생했어요');
+  return data;
+}
+
+async function apiGet(path, token) {
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, { headers });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// ── FlyingText ─────────────────────────────────────
+function FlyingText({ text, timeOfDay, onDone }) {
+  const [phase, setPhase] = React.useState('rising');
+  const seed = React.useMemo(() => Math.random() * 20 - 10, []);
+  const particles = React.useMemo(() =>
+    [...Array(14)].map(() => ({
+      dx: (Math.random() - 0.5) * 120,
+      dy: -60 - Math.random() * 100,
+      delay: Math.random() * 0.6,
+      size: 2 + Math.random() * 3,
+    })), []);
+
+  React.useEffect(() => {
+    const t1 = setTimeout(() => setPhase('dissolving'), 2200);
+    const t2 = setTimeout(() => onDone && onDone(), 4500);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
+  const color = TEXT_COLOR[timeOfDay];
+  const particleColor = timeOfDay === 'night' || timeOfDay === 'dawn'
+    ? 'rgba(230,220,255,0.85)'
+    : timeOfDay === 'evening' ? 'rgba(255,220,195,0.9)'
+    : 'rgba(255,255,255,0.9)';
+
+  return (
+    <div style={{ position: 'absolute', left: `calc(50% + ${seed * 2}px)`, bottom: '26%', transform: 'translateX(-50%)', pointerEvents: 'none', zIndex: 9 }}>
+      {phase === 'rising' && (
+        <div style={{
+          fontFamily: "'Gowun Dodum', 'Noto Sans KR', sans-serif",
+          fontSize: 18, color,
+          textShadow: timeOfDay === 'night' ? '0 0 12px rgba(200,180,255,0.4)' : '0 1px 3px rgba(255,255,255,0.3)',
+          whiteSpace: 'nowrap',
+          animation: 'toki-fly 2.5s cubic-bezier(.25,.6,.3,1) forwards',
+          '--sway': `${seed}px`,
+        }}>
+          {text}
+        </div>
+      )}
+      {phase === 'dissolving' && (
+        <div style={{ position: 'relative', width: 1, height: 1 }}>
+          {particles.map((p, i) => (
+            <div key={i} style={{
+              position: 'absolute', left: 0, top: 0,
+              width: p.size, height: p.size, borderRadius: '50%',
+              background: particleColor, boxShadow: `0 0 ${p.size * 2}px ${particleColor}`,
+              animation: `toki-particle 2.2s ease-out ${p.delay}s forwards`,
+              '--dx': `${p.dx}px`, '--dy': `${p.dy}px`,
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── InputBar ───────────────────────────────────────
+function InputBar({ timeOfDay, onFly }) {
+  const [value, setValue] = React.useState('');
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && value.trim()) {
+      onFly && onFly(value.trim());
+      setValue('');
+    }
+  };
+  return (
+    <div style={{
+      width: '100%', maxWidth: 520, margin: '0 auto',
+      background: INPUT_BG[timeOfDay],
+      backdropFilter: 'blur(14px) saturate(1.1)',
+      WebkitBackdropFilter: 'blur(14px) saturate(1.1)',
+      border: `1px solid ${INPUT_BORDER[timeOfDay]}`,
+      borderRadius: 18,
+      padding: '16px 22px',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.25)',
+      transition: 'all 0.6s ease',
+    }}>
+      <input
+        type="text" value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKey}
+        placeholder={PLACEHOLDERS[timeOfDay]}
+        maxLength={100}
+        autoComplete="off"
+        style={{
+          width: '100%', background: 'transparent', border: 'none', outline: 'none',
+          fontFamily: "'Gowun Dodum', 'Noto Sans KR', sans-serif",
+          fontSize: 17, color: TEXT_COLOR[timeOfDay], letterSpacing: '-0.01em',
+        }}
+      />
+    </div>
+  );
+}
+
+// ── LoginModal ─────────────────────────────────────
+function LoginModal({ timeOfDay, onClose, onAuth }) {
+  const [tab, setTab] = React.useState('login');
+  const [nickname, setNickname] = React.useState('');
+  const [pin, setPin] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+
+  const submit = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const path = tab === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const data = await apiPost(path, { nickname, pin });
+      onAuth(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  let g;
-  if (hour >= 0 && hour < 6)       g = gradients.dawn;
-  else if (hour >= 6 && hour < 12) g = gradients.morning;
-  else if (hour >= 12 && hour < 18) g = gradients.day;
-  else if (hour >= 18 && hour < 21) g = gradients.evening;
-  else                               g = gradients.night;
+  const inputStyle = {
+    padding: '11px 14px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 10,
+    background: 'rgba(255,255,255,0.7)', fontFamily: "'Noto Sans KR', sans-serif",
+    fontSize: 13, color: '#3a2f28', outline: 'none', width: '100%',
+  };
 
-  return g;
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(20,15,30,0.35)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20, animation: 'toki-fade-in 0.4s ease' }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width: '90%', maxWidth: 380, background: 'rgba(255,253,248,0.96)', backdropFilter: 'blur(24px)', borderRadius: 22, padding: '34px 32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)', fontFamily: "'Noto Sans KR', sans-serif", color: '#3a2f28', animation: 'toki-scale-in 0.35s cubic-bezier(.2,.8,.3,1)', position: 'relative' }}
+      >
+        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 16, background: 'transparent', border: 'none', fontSize: 18, color: 'rgba(0,0,0,0.4)', cursor: 'pointer', padding: 4 }}>×</button>
+
+        <div style={{ fontFamily: "'Gowun Dodum', serif", fontSize: 22, fontWeight: 700, marginBottom: 6, letterSpacing: '-0.02em' }}>🥚  토키에게</div>
+        <div style={{ fontSize: 13, lineHeight: 1.75, opacity: 0.75, marginBottom: 18 }}>
+          마음에 걸리는 말이 있다면 이곳에 흘려보내요.<br/>
+          토키가 조용히 듣고, 하늘로 실어 보내 줄게요.
+        </div>
+
+        <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.1), transparent)', margin: '0 0 18px' }} />
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {['login', 'register'].map(t => (
+            <button key={t} onClick={() => { setTab(t); setError(''); }} style={{ flex: 1, padding: '8px', borderRadius: 10, border: `1px solid ${tab === t ? 'rgba(58,47,40,0.4)' : 'rgba(0,0,0,0.1)'}`, background: tab === t ? '#3a2f28' : 'transparent', color: tab === t ? '#fef6e8' : '#3a2f28', fontFamily: "'Noto Sans KR', sans-serif", fontSize: 12, cursor: 'pointer', transition: 'all 0.15s' }}>
+              {t === 'login' ? '로그인' : '처음이에요'}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="닉네임" maxLength={20} style={inputStyle} />
+          <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="PIN 4자리 (숫자)" type="password" inputMode="numeric" maxLength={4} style={inputStyle}
+            onKeyDown={e => e.key === 'Enter' && submit()} />
+          {error && <div style={{ fontSize: 12, color: '#c0392b', textAlign: 'center' }}>{error}</div>}
+          <button onClick={submit} disabled={loading} style={{ marginTop: 6, padding: '12px', borderRadius: 12, border: 'none', background: '#3a2f28', color: '#fef6e8', fontFamily: "'Noto Sans KR', sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: '0.05em', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+            {loading ? '...' : tab === 'login' ? '로그인' : '알 입양하기'}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 11, opacity: 0.45, lineHeight: 1.6, textAlign: 'center' }}>
+          PIN을 잊으면 새 알을 입양하면 돼요.
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function spawnParticle(weather, hour) {
-  if (!weather) return;
-  const cond = weather.condition;
-  if (cond === 'rain' || cond === 'drizzle' || cond === 'thunderstorm') {
-    return { type: 'rain', x: Math.random() * canvas.width, y: -10, speed: 8 + Math.random() * 4, opacity: 0.4 + Math.random() * 0.3 };
-  }
-  if (cond === 'snow') {
-    return { type: 'snow', x: Math.random() * canvas.width, y: -10, speed: 1 + Math.random() * 1.5, drift: (Math.random() - 0.5) * 0.5, opacity: 0.6 + Math.random() * 0.3 };
-  }
-  if (hour >= 21 || hour < 6) {
-    return { type: 'star', x: Math.random() * canvas.width, y: Math.random() * canvas.height * 0.6, twinkle: Math.random() * Math.PI * 2, opacity: 0.3 + Math.random() * 0.5 };
-  }
-  return null;
-}
+// ── NameToast ──────────────────────────────────────
+function NameToast({ timeOfDay, token, onNamed, onSkip }) {
+  const [name, setName] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const tc = TEXT_COLOR[timeOfDay];
 
-function drawBg() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-  const hour = now.getHours();
-  const colors = getBgGradient(hour, state.weather);
-
-  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, colors[0]);
-  grad.addColorStop(0.5, colors[1]);
-  grad.addColorStop(1, colors[2]);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // 파티클 스폰
-  if (Math.random() < 0.05) {
-    const p = spawnParticle(state.weather, hour);
-    if (p && particles.length < 200) particles.push(p);
-  }
-
-  // 파티클 그리기
-  particles = particles.filter(p => {
-    ctx.save();
-    if (p.type === 'rain') {
-      ctx.strokeStyle = `rgba(180,210,255,${p.opacity})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - 1, p.y + 10);
-      ctx.stroke();
-      p.y += p.speed;
-      ctx.restore();
-      return p.y < canvas.height + 20;
-    }
-    if (p.type === 'snow') {
-      ctx.fillStyle = `rgba(255,255,255,${p.opacity})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-      p.y += p.speed;
-      p.x += p.drift;
-      ctx.restore();
-      return p.y < canvas.height + 20;
-    }
-    if (p.type === 'star') {
-      p.twinkle += 0.02;
-      const op = p.opacity * (0.7 + 0.3 * Math.sin(p.twinkle));
-      ctx.fillStyle = `rgba(255,255,255,${op})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      return true; // 별은 사라지지 않음
-    }
-    ctx.restore();
-    return false;
-  });
-
-  requestAnimationFrame(drawBg);
-}
-drawBg();
-
-// ── 날씨 로드 ─────────────────────────────────────
-async function loadWeather() {
-  try {
-    const res = await fetch('/api/weather');
-    if (res.ok) state.weather = await res.json();
-  } catch {}
-}
-loadWeather();
-setInterval(loadWeather, 30 * 60 * 1000);
-
-// ── 알 상태 ───────────────────────────────────────
-function updateEggState() {
-  const idle = (Date.now() - state.lastInteraction) / 1000 / 60; // 분
-  if (idle > 30) {
-    egg.classList.add('cold');
-  } else {
-    egg.classList.remove('cold');
-  }
-
-  if (state.eggName) {
-    eggLabel.textContent = state.eggName;
-  } else if (state.token) {
-    eggLabel.textContent = '이름 없는 알';
-  } else {
-    eggLabel.textContent = '';
-  }
-
-  if (state.adoptedAt) {
-    const days = Math.floor((Date.now() - new Date(state.adoptedAt)) / 86400000);
-    daysLabel.textContent = `D+${days} 함께한 날`;
-  }
-
-  userLabel.textContent = state.nickname ? `${state.nickname}의 알` : '';
-}
-setInterval(updateEggState, 60 * 1000);
-updateEggState();
-
-// ── 알 클릭 ───────────────────────────────────────
-egg.addEventListener('click', async () => {
-  state.lastInteraction = Date.now();
-  egg.classList.remove('clicked');
-  void egg.offsetWidth;
-  egg.classList.add('clicked');
-  setTimeout(() => egg.classList.remove('clicked'), 400);
-  updateEggState();
-
-  if (state.token) {
+  const submit = async () => {
+    if (!name.trim()) return;
+    setLoading(true);
     try {
-      await fetch('/api/egg/touch', { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } });
+      const data = await apiPatch('/api/egg/name', { name: name.trim() }, token);
+      onNamed(data.egg_name);
     } catch {}
-  }
-});
+    setLoading(false);
+  };
 
-// ── 메시지 날리기 ─────────────────────────────────
-msgInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && msgInput.value.trim()) {
-    launchMessage(msgInput.value.trim());
-    msgInput.value = '';
-    state.lastInteraction = Date.now();
-    updateEggState();
-  }
-});
-
-function launchMessage(text) {
-  const el = document.createElement('div');
-  el.className = 'floating-msg';
-  el.textContent = text;
-
-  const inputRect = msgInput.getBoundingClientRect();
-  const startX = inputRect.left + inputRect.width / 2 + (Math.random() - 0.5) * 60;
-  const startY = inputRect.top - 10;
-  const drift = ((Math.random() - 0.5) * 80) + 'px';
-
-  el.style.left = startX + 'px';
-  el.style.top = startY + 'px';
-  el.style.setProperty('--drift', drift);
-
-  messagesArea.appendChild(el);
-  el.addEventListener('animationend', () => el.remove());
+  return (
+    <div style={{
+      position: 'fixed', bottom: 110, left: '50%', transform: 'translateX(-50%)',
+      background: 'rgba(30,20,50,0.88)', border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 14, padding: '14px 18px', display: 'flex', alignItems: 'center',
+      gap: 8, fontSize: 13, color: 'rgba(255,255,255,0.8)', zIndex: 50,
+      backdropFilter: 'blur(8px)', whiteSpace: 'nowrap', animation: 'toki-scale-in 0.3s ease',
+    }}>
+      <span>알 이름을 지어줄래요?</span>
+      <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} placeholder="이름" maxLength={20}
+        style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '6px 10px', color: '#fff', fontSize: 13, width: 100, outline: 'none' }} />
+      <button onClick={submit} disabled={loading} style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(201,160,220,0.35)', color: '#fff', fontSize: 12, cursor: 'pointer' }}>지어주기</button>
+      <button onClick={onSkip} style={{ padding: '6px 8px', borderRadius: 8, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.4)', fontSize: 12, cursor: 'pointer' }}>나중에</button>
+    </div>
+  );
 }
 
-// ── 모달 ──────────────────────────────────────────
-helpBtn.addEventListener('click', () => modalOverlay.classList.remove('hidden'));
-modalClose.addEventListener('click', () => modalOverlay.classList.add('hidden'));
-modalOverlay.addEventListener('click', (e) => {
-  if (e.target === modalOverlay) modalOverlay.classList.add('hidden');
-});
+// ── App ────────────────────────────────────────────
+function App() {
+  const [timeOfDay, setTimeOfDay] = React.useState(getTimeOfDay());
+  const [weather, setWeather] = React.useState('clear');
+  const [flying, setFlying] = React.useState([]);
+  const [showModal, setShowModal] = React.useState(false);
+  const [showNameToast, setShowNameToast] = React.useState(false);
+  const [eggState, setEggState] = React.useState('idle');
 
-// 탭 전환
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    const which = tab.dataset.tab;
-    document.getElementById('login-form').classList.toggle('hidden', which !== 'login');
-    document.getElementById('register-form').classList.toggle('hidden', which !== 'register');
-  });
-});
+  // Auth state
+  const [token, setToken] = React.useState(() => localStorage.getItem('toki_token'));
+  const [nickname, setNickname] = React.useState(() => localStorage.getItem('toki_nickname'));
+  const [eggName, setEggName] = React.useState(() => localStorage.getItem('toki_egg_name'));
+  const [adoptedAt, setAdoptedAt] = React.useState(() => localStorage.getItem('toki_adopted_at'));
+  const lastInteraction = React.useRef(Date.now());
 
-// 로그인
-document.getElementById('login-btn').addEventListener('click', async () => {
-  const nickname = document.getElementById('login-nickname').value.trim();
-  const pin = document.getElementById('login-pin').value.trim();
-  const errEl = document.getElementById('login-error');
-  errEl.classList.add('hidden');
+  // Update time of day every minute
+  React.useEffect(() => {
+    const iv = setInterval(() => setTimeOfDay(getTimeOfDay()), 60000);
+    return () => clearInterval(iv);
+  }, []);
 
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nickname, pin }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.detail || '로그인 실패'; errEl.classList.remove('hidden'); return; }
-    saveAuth(data);
-    modalOverlay.classList.add('hidden');
-    checkNameToast();
-  } catch {
-    errEl.textContent = '서버 오류가 발생했어요'; errEl.classList.remove('hidden');
-  }
-});
+  // Fetch weather
+  React.useEffect(() => {
+    const load = async () => {
+      const data = await apiGet('/api/weather');
+      if (data) setWeather(data.condition);
+    };
+    load();
+    const iv = setInterval(load, 30 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, []);
 
-// 회원가입
-document.getElementById('register-btn').addEventListener('click', async () => {
-  const nickname = document.getElementById('reg-nickname').value.trim();
-  const pin = document.getElementById('reg-pin').value.trim();
-  const errEl = document.getElementById('reg-error');
-  errEl.classList.add('hidden');
-
-  try {
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nickname, pin }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.detail || '가입 실패'; errEl.classList.remove('hidden'); return; }
-    saveAuth(data);
-    modalOverlay.classList.add('hidden');
-    checkNameToast();
-  } catch {
-    errEl.textContent = '서버 오류가 발생했어요'; errEl.classList.remove('hidden');
-  }
-});
-
-function saveAuth(data) {
-  state.token = data.token;
-  state.nickname = data.nickname;
-  state.eggName = data.egg_name;
-  state.adoptedAt = data.adopted_at;
-  localStorage.setItem('toki_token', data.token);
-  localStorage.setItem('toki_nickname', data.nickname);
-  if (data.egg_name) localStorage.setItem('toki_egg_name', data.egg_name);
-  if (data.adopted_at) localStorage.setItem('toki_adopted_at', data.adopted_at);
-  updateEggState();
-}
-
-// ── 이름 토스트 ───────────────────────────────────
-function checkNameToast() {
-  if (state.token && !state.eggName) {
-    nameToast.classList.remove('hidden');
-  }
-}
-
-nameSkip.addEventListener('click', () => nameToast.classList.add('hidden'));
-nameBtn.addEventListener('click', async () => {
-  const name = nameInput.value.trim();
-  if (!name) return;
-  try {
-    const res = await fetch('/api/egg/name', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ name }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      state.eggName = data.egg_name;
-      localStorage.setItem('toki_egg_name', data.egg_name);
-      updateEggState();
-      nameToast.classList.add('hidden');
-    }
-  } catch {}
-});
-
-// ── 세션 복원 ─────────────────────────────────────
-if (state.token) {
-  fetch('/api/egg/me', { headers: { Authorization: `Bearer ${state.token}` } })
-    .then(r => r.ok ? r.json() : null)
-    .then(data => {
-      if (data) {
-        state.eggName = data.egg_name;
-        state.adoptedAt = data.adopted_at;
-        if (data.egg_name) localStorage.setItem('toki_egg_name', data.egg_name);
-        if (data.adopted_at) localStorage.setItem('toki_adopted_at', data.adopted_at);
-        updateEggState();
-        checkNameToast();
-      } else {
-        // 토큰 만료
+  // Restore session
+  React.useEffect(() => {
+    if (!token) return;
+    apiGet('/api/egg/me', token).then(data => {
+      if (!data) {
         localStorage.removeItem('toki_token');
         localStorage.removeItem('toki_nickname');
-        state.token = null;
-        state.nickname = null;
+        setToken(null); setNickname(null);
+        return;
       }
-    })
-    .catch(() => {});
+      setEggName(data.egg_name);
+      setAdoptedAt(data.adopted_at);
+      if (data.egg_name) localStorage.setItem('toki_egg_name', data.egg_name);
+      if (data.adopted_at) localStorage.setItem('toki_adopted_at', data.adopted_at);
+      if (!data.egg_name) setShowNameToast(true);
+    }).catch(() => {});
+  }, []);
+
+  // Idle state check
+  React.useEffect(() => {
+    const iv = setInterval(() => {
+      const idle = (Date.now() - lastInteraction.current) / 1000 / 60;
+      setEggState(idle > 30 ? 'idle-long' : 'idle');
+    }, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const handleAuth = (data) => {
+    setToken(data.token);
+    setNickname(data.nickname);
+    setEggName(data.egg_name);
+    setAdoptedAt(data.adopted_at);
+    localStorage.setItem('toki_token', data.token);
+    localStorage.setItem('toki_nickname', data.nickname);
+    if (data.egg_name) localStorage.setItem('toki_egg_name', data.egg_name);
+    if (data.adopted_at) localStorage.setItem('toki_adopted_at', data.adopted_at);
+    setShowModal(false);
+    if (!data.egg_name) setShowNameToast(true);
+  };
+
+  const handleEggClick = async () => {
+    lastInteraction.current = Date.now();
+    setEggState('idle');
+    if (token) {
+      try { await apiPost('/api/egg/touch', {}, token); } catch {}
+    }
+  };
+
+  const handleFly = (text) => {
+    lastInteraction.current = Date.now();
+    const id = Date.now() + Math.random();
+    setFlying(prev => [...prev, { id, text }]);
+  };
+
+  const tc = TEXT_COLOR[timeOfDay];
+  const loggedIn = !!token;
+  const days = adoptedAt ? daysSince(adoptedAt) : null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0 }}>
+      <Scene timeOfDay={timeOfDay} weather={weather}>
+
+        {/* Top right — user info */}
+        {loggedIn && (
+          <div style={{ position: 'absolute', top: 22, right: 28, textAlign: 'right', fontFamily: "'Gowun Dodum', 'Noto Sans KR', sans-serif", color: tc, zIndex: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em' }}>{nickname}</div>
+            {days !== null && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>D+{days} 함께한 날</div>}
+          </div>
+        )}
+
+        {/* Egg */}
+        <div style={{ position: 'absolute', left: '50%', top: '38%', transform: 'translate(-50%, -30%)', zIndex: 6 }}>
+          <Egg
+            timeOfDay={timeOfDay}
+            weather={weather}
+            size={200}
+            state={eggState}
+            interactive={true}
+            showName={loggedIn && !!eggName}
+            name={eggName || '토키'}
+            onClick={handleEggClick}
+          />
+        </div>
+
+        {/* Flying texts */}
+        {flying.map(f => (
+          <FlyingText key={f.id} text={f.text} timeOfDay={timeOfDay} onDone={() => setFlying(prev => prev.filter(x => x.id !== f.id))} />
+        ))}
+
+        {/* Input */}
+        <div style={{ position: 'absolute', left: '50%', bottom: '22%', transform: 'translateX(-50%)', width: '80%', maxWidth: 520, zIndex: 7 }}>
+          <InputBar timeOfDay={timeOfDay} onFly={handleFly} />
+        </div>
+
+        {/* Bottom chrome */}
+        <div style={{ position: 'absolute', bottom: 20, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', padding: '0 28px', zIndex: 6 }}>
+          <button onClick={() => setShowModal(true)} style={{ background: 'transparent', border: 'none', color: tc, fontFamily: "'Noto Sans KR', sans-serif", fontSize: 12, opacity: 0.6, cursor: 'pointer', letterSpacing: '0.05em', padding: 4 }}>
+            ? 도움말
+          </button>
+          {!loggedIn && (
+            <button onClick={() => setShowModal(true)} style={{ background: 'transparent', border: 'none', color: tc, fontFamily: "'Noto Sans KR', sans-serif", fontSize: 12, opacity: 0.7, cursor: 'pointer', letterSpacing: '0.05em', padding: 4 }}>
+              로그인
+            </button>
+          )}
+        </div>
+
+        {/* Modal */}
+        {showModal && (
+          <LoginModal timeOfDay={timeOfDay} onClose={() => setShowModal(false)} onAuth={handleAuth} />
+        )}
+      </Scene>
+
+      {/* Name toast */}
+      {showNameToast && token && (
+        <NameToast
+          timeOfDay={timeOfDay}
+          token={token}
+          onNamed={(name) => { setEggName(name); localStorage.setItem('toki_egg_name', name); setShowNameToast(false); }}
+          onSkip={() => setShowNameToast(false)}
+        />
+      )}
+    </div>
+  );
 }
 
-// 플레이스홀더 시간대별
-function updatePlaceholder() {
-  const hour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
-  const placeholders = {
-    dawn: '잠 못 자고 있어?',
-    morning: '오늘 하루 어떨 것 같아?',
-    day: '지금 어때?',
-    evening: '오늘 수고했어',
-    night: '뭐든 털어놔봐',
-  };
-  let ph;
-  if (hour < 6) ph = placeholders.dawn;
-  else if (hour < 12) ph = placeholders.morning;
-  else if (hour < 18) ph = placeholders.day;
-  else if (hour < 21) ph = placeholders.evening;
-  else ph = placeholders.night;
-  msgInput.placeholder = ph;
-}
-updatePlaceholder();
-setInterval(updatePlaceholder, 60 * 1000);
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
